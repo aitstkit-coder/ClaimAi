@@ -1,0 +1,8 @@
+# Codebase Exclusions
+Romanstone/
+ClaimAi/
+
+# System Files & Logs
+*.log
+.DS_Store
+Thumbs.db

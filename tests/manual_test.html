@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ClaimAi Robustness Test Page</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    h1 {
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 12px;
+      color: #1e3a8a;
+    }
+    .test-section {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .test-section h3 {
+      margin-top: 0;
+      color: #2563eb;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 8px;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    input:focus, textarea:focus {
+      outline: 2px solid #3b82f6;
+    }
+    .contenteditable-editor {
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 12px;
+      background: white;
+      min-height: 100px;
+      margin-bottom: 4px;
+    }
+    .contenteditable-editor:focus {
+      outline: 2px solid #3b82f6;
+    }
+    iframe {
+      width: 100%;
+      height: 150px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: white;
+    }
+    button {
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 8px;
+      margin-right: 8px;
+    }
+    button:hover {
+      background-color: #1d4ed8;
+    }
+    .hint {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .flex-container {
+      display: flex;
+      gap: 16px;
+    }
+    .flex-child {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>ClaimAi Extension Test Page</h1>
+  <p>Use this page to test badge injections, Shadow DOM support, iframes, contenteditable areas, and React rerender simulations.</p>
+
+  <!-- 1. Standard Fields & Multi-field Alignment -->
+  <div class="test-section">
+    <h3>1. Standard Inputs & Multi-Field Alignment</h3>
+    <p class="hint">Type valid ICD-10 codes like <code>E11.9</code> or <code>H36.0</code> (PMB) in both inputs. Verify their badges display independently and do not conflict.</p>
+    <div class="flex-container">
+      <div class="flex-child">
+        <label for="input1">Diagnosis Code 1</label>
+        <input type="text" id="input1" placeholder="Type ICD-10 code (e.g. E11.9)...">
+      </div>
+      <div class="flex-child">
+        <label for="input2">Diagnosis Code 2</label>
+        <input type="text" id="input2" placeholder="Type another ICD-10 code (e.g. A00.0)...">
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Shadow DOM Component -->
+  <div class="test-section">
+    <h3>2. Shadow DOM Input</h3>
+    <p class="hint">This input resides inside a Shadow Root. The extension must detect changes, perform validation, and inject badges styled correctly inside the shadow root.</p>
+    <div id="shadow-host"></div>
+  </div>
+
+  <!-- 3. Iframes -->
+  <div class="test-section">
+    <h3>3. Iframe Input</h3>
+    <p class="hint">This input is inside a subframe (using <code>srcdoc</code>). Verify that the extension is injected and displays badges.</p>
+    <iframe srcdoc="
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: sans-serif; padding: 10px; margin: 0; background: #fafafa; }
+          input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        </style>
+      </head>
+      <body>
+        <label style='font-size: 14px;'>ICD-10 Code in Iframe</label>
+        <input type='text' id='iframe-input' placeholder='Type code in iframe (e.g. E11.9)...'>
+      </body>
+      </html>
+    "></iframe>
+  </div>
+
+  <!-- 4. Contenteditable Editor -->
+  <div class="test-section">
+    <h3>4. Rich Text Editor (contenteditable)</h3>
+    <p class="hint">Edit the text inside the editor. Type codes like <code>E11.9</code>. Badges should be appended as a sibling <i>outside</i> the editor container, not inside the text.</p>
+    <div class="contenteditable-editor" contenteditable="true" id="editor">
+      <p>This is a custom clinical notes editor. You can type diagnoses here.</p>
+      <p>Patient presents with symptoms consistent with <b>E11.9</b>.</p>
+    </div>
+  </div>
+
+  <!-- 5. React Re-render Simulation -->
+  <div class="test-section">
+    <h3>5. React Rerender / VDOM Simulation</h3>
+    <p class="hint">Type a code in the input below, then click the button. The button will simulate a React rerender by programmatically removing the badge container. The extension should immediately detect the removal and re-inject it.</p>
+    <input type="text" id="react-input" placeholder="Type ICD-10 (e.g. E11.9)...">
+    <button id="btn-react-render">Simulate VDOM Rerender (Removes Badge)</button>
+  </div>
+
+  <!-- 6. Dynamic Form & Stress Testing -->
+  <div class="test-section">
+    <h3>6. Dynamic Fields & Stress Testing</h3>
+    <p class="hint">Use the buttons below to test adding fields dynamically and high volume typing.</p>
+    <div id="dynamic-container" style="margin-bottom: 12px;">
+      <!-- Dynamic inputs go here -->
+    </div>
+    <button id="btn-add-field">Add Dynamic Field</button>
+    <button id="btn-simulate-typing">Simulate High-Volume Typing (Input 1)</button>
+  </div>
+
+  <script>
+    // 2. Setup Shadow DOM
+    const shadowHost = document.getElementById('shadow-host');
+    const shadowRoot = shadowHost.attachShadow({ mode: 'open' });
+    shadowRoot.innerHTML = `
+      <style>
+        label { display: block; margin-bottom: 4px; font-size: 14px; font-weight: bold; }
+        input { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; }
+      </style>
+      <label>Shadow Input</label>
+      <input type="text" placeholder="Type code inside Shadow DOM (e.g. H36.0)...">
+    `;
+
+    // 5. Setup VDOM Simulation
+    document.getElementById('btn-react-render').addEventListener('click', () => {
+      const input = document.getElementById('react-input');
+      const parent = input.parentNode;
+      const badgeContainer = parent.querySelector('.claimai-badge-container');
+      if (badgeContainer) {
+        console.log('Test Page: Simulating VDOM rerender by removing badge container.');
+        badgeContainer.remove();
+      } else {
+        alert('Please type an ICD-10 code in the React Input first to generate a badge.');
+      }
+    });
+
+    // 6. Setup Dynamic Fields
+    document.getElementById('btn-add-field').addEventListener('click', () => {
+      const container = document.getElementById('dynamic-container');
+      const div = document.createElement('div');
+      div.style.marginBottom = '8px';
+      
+      const count = container.children.length + 1;
+      div.innerHTML = `
+        <label>Dynamic Input #${count}</label>
+        <input type="text" placeholder="Dynamic code (e.g. E11.9)...">
+      `;
+      container.appendChild(div);
+    });
+
+    // 6. Setup High-Volume Typing Simulation
+    document.getElementById('btn-simulate-typing').addEventListener('click', () => {
+      const input = document.getElementById('input1');
+      input.focus();
+      let text = '';
+      const targetText = 'E11.9';
+      let i = 0;
+
+      function typeChar() {
+        if (i < targetText.length) {
+          text += targetText[i];
+          input.value = text;
+          // Dispatch input event to simulate typing
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          i++;
+          setTimeout(typeChar, 80); // Rapid typing speed (80ms per char)
+        }
+      }
+      typeChar();
+    });
+  </script>
+</body>
+</html>

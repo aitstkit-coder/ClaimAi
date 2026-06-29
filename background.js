@@ -1,6 +1,6 @@
 // background.js
 // Load the database engine as a classic script so we can avoid module bundling
-importScripts('./lib/db.js');
+importScripts('./lib/utils.js', './lib/telemetry.js', './lib/db.js');
 
 if (typeof chrome !== 'undefined' && chrome.runtime) {
   console.log('%cClaimAi Background Service Worker Loaded ✅', 'color: #10b981; font-weight: bold');
@@ -81,70 +81,117 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     }
   }
 
-  chrome.runtime.onInstalled.addListener(async (details) => {
-      console.log('ClaimAi: Initialization sequence started.');
-    // Fire-and-forget cleanup of legacy V1 DB (do not await)
-    safeDeleteLegacyDatabase('ClaimAiDatabase');
-      try {
+  let initPromise = null;
+
+  /**
+   * Initializes IndexedDB and performs high-speed seeding with robust retry logic.
+   * Caches and verifies completion state in both IndexedDB count and chrome.storage.local.
+   */
+  async function ensureDbInitializedAndSeeded() {
+    if (initPromise) return initPromise;
+
+    initPromise = (async () => {
+      let attempt = 0;
+      let delay = 500;
+      const maxAttempts = 3;
+
+      while (attempt < maxAttempts) {
+        attempt++;
+        try {
+          console.log(`ClaimAi: Database init/seed attempt ${attempt} of ${maxAttempts}...`);
           await db.init();
 
-          const currentCount = await db.countRecords();
-          console.log(`Current IndexedDB record count: ${currentCount}`);
-
-          if (currentCount === 0) {
-              console.log('Database is empty. Initiating high-speed seeding...');
-
-              const response = await fetch(chrome.runtime.getURL('lib/icd10-index.json'));
-              if (!response.ok) {
-                  throw new Error(`Failed to load lib/icd10-index.json: Status ${response.status}`);
-              }
-
-              const rawData = await response.json();
-              const icdArray = Object.keys(rawData)
-                  .filter(key => key && rawData[key])
-                  .map(key => ({
-                      code: key.trim().toUpperCase(),
-                      displayCode: rawData[key].code || key,
-                      description: rawData[key].description || 'No description provided.',
-                      pmbCode: rawData[key].pmbCode || null
-                  }));
-
-              console.log(`Prepared ${icdArray.length} valid records. Executing database write transaction...`);
-
-              const startTime = performance.now();
-              await db.bulkInsertAll(icdArray);
-              const endTime = performance.now();
-
-              console.log(`ClaimAi: Database seeded successfully in ${((endTime - startTime) / 1000).toFixed(2)}s.`);
-          } else {
-              console.log('Database already initialized and populated.');
-          }
-          // Ensure context menu is created for text selection lookups
-          try {
-            chrome.contextMenus.removeAll(() => {
-              chrome.contextMenus.create({
-                id: 'claimai-lookup',
-                title: 'Lookup in ClaimAi',
-                contexts: ['selection']
-              });
-              console.log('ClaimAi: Context menu created');
-            });
-          } catch (cmErr) {
-            console.warn('ClaimAi: Failed to create context menu', cmErr);
-          }
-      } catch (err) {
-          const errorDetails = {
-              message: err.message || err.toString(),
-              name: err.name || 'UnknownError',
-              stack: err.stack || 'No stack trace available'
-          };
-
-          console.error('Error initializing DB on install:', errorDetails.message, {
-              errorType: errorDetails.name,
-              stackTrace: errorDetails.stack,
-              dbInitialized: !!db.db
+          const isSeeded = await db.isFullySeeded(50000);
+          const storageResult = await new Promise(resolve => {
+            chrome.storage.local.get(['dbSeeded'], (res) => resolve(res && res.dbSeeded));
           });
+
+          if (isSeeded && storageResult) {
+            console.log('ClaimAi: Database is fully seeded and verified.');
+            return true;
+          }
+
+          console.log('ClaimAi: Database is unseeded or incomplete. Starting seeding process...');
+          
+          // Clear cache flag before starting to prevent race conditions
+          await new Promise(resolve => chrome.storage.local.remove(['dbSeeded'], resolve));
+
+          const response = await fetch(chrome.runtime.getURL('lib/icd10-index.json'));
+          if (!response.ok) {
+            throw new Error(`Failed to load lib/icd10-index.json: Status ${response.status}`);
+          }
+
+          const rawData = await response.json();
+          const icdArray = Object.keys(rawData)
+            .filter(key => key && rawData[key])
+            .map(key => ({
+              code: key.trim().toUpperCase(),
+              displayCode: rawData[key].code || key,
+              description: rawData[key].description || 'No description provided.',
+              pmbCode: rawData[key].pmbCode || null
+            }));
+
+          console.log(`ClaimAi: Seeding ${icdArray.length} records...`);
+          const startTime = performance.now();
+          await db.bulkInsertAll(icdArray);
+          const endTime = performance.now();
+          console.log(`ClaimAi: Seeding complete in ${((endTime - startTime) / 1000).toFixed(2)}s.`);
+
+          // Double check database to verify seeding completed properly
+          const verified = await db.isFullySeeded(50000);
+          if (!verified) {
+            throw new Error('Database verification failed: count did not meet the required threshold.');
+          }
+
+          await new Promise(resolve => {
+            chrome.storage.local.set({ dbSeeded: true }, resolve);
+          });
+          console.log('ClaimAi: Database seeding successfully completed and verified.');
+          return true;
+        } catch (err) {
+          console.error(`ClaimAi: Database initialization/seeding failed on attempt ${attempt}:`, err);
+          if (attempt >= maxAttempts) {
+            throw err;
+          }
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // Exponential backoff
+        }
       }
+    })();
+
+    // Clear initPromise on rejection so next request can retry
+    initPromise.catch(() => {
+      initPromise = null;
+    });
+
+    return initPromise;
+  }
+
+  chrome.runtime.onInstalled.addListener(async (details) => {
+    console.log('ClaimAi: Initialization sequence started.');
+    // Fire-and-forget cleanup of legacy V1 DB (do not await)
+    safeDeleteLegacyDatabase('ClaimAiDatabase');
+
+    try {
+      await ensureDbInitializedAndSeeded();
+      await self.ClaimAiTelemetry.initializeTelemetry();
+
+      // Ensure context menu is created for text selection lookups
+      try {
+        chrome.contextMenus.removeAll(() => {
+          chrome.contextMenus.create({
+            id: 'claimai-lookup',
+            title: 'Lookup in ClaimAi',
+            contexts: ['selection']
+          });
+          console.log('ClaimAi: Context menu created');
+        });
+      } catch (cmErr) {
+        console.warn('ClaimAi: Failed to create context menu', cmErr);
+      }
+    } catch (err) {
+      console.error('ClaimAi: Non-blocking error during onInstalled initialization:', err);
+    }
   });
 
   // Handle right-click menu click
@@ -233,48 +280,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
    * When a user types a shorter form like "E11.5", we also try prefix matching
    * against the next expected sub-code (e.g. E11.50, E11.51 … E11.59).
    */
-  function buildLookupVariants(rawCode) {
-    let upper = (rawCode || '').toUpperCase().trim();
-    if (upper.startsWith('0')) {
-      upper = 'O' + upper.slice(1);
-    }
-    const undotted = upper.replace(/\./g, '');
-    const variants = new Set();
-
-    // 1. Exact dotted form as typed (e.g. "E11.5")
-    variants.add(upper);
-    // 2. Exact undotted form (e.g. "E115")
-    variants.add(undotted);
-
-    // 3. Sub-code prefix expansion: if the typed code has a decimal part that is
-    //    shorter than what the dataset stores, try appending 0-9.
-    //    e.g. "E11.5" → try "E11.50" … "E11.59" (and their undotted equivalents)
-    const dotIdx = upper.indexOf('.');
-    if (dotIdx !== -1) {
-      const decPart = upper.slice(dotIdx + 1);
-      // Dataset decimal parts are 2-4 digits; expand only if user typed 1-3 digits
-      if (decPart.length >= 1 && decPart.length <= 3) {
-        for (let d = 0; d <= 9; d++) {
-          const expanded = `${upper}${d}`;
-          variants.add(expanded);
-          variants.add(expanded.replace(/\./g, ''));
-        }
-      }
-    } else {
-      // No dot typed — also try adding a dot after the 3rd char and expanding
-      // e.g. "E115" → try "E11.50" … "E11.59"
-      if (undotted.length === 4) {
-        const base = `${undotted.slice(0, 3)}.${undotted.slice(3)}`;
-        for (let d = 0; d <= 9; d++) {
-          const expanded = `${base}${d}`;
-          variants.add(expanded);
-          variants.add(expanded.replace(/\./g, ''));
-        }
-      }
-    }
-
-    return Array.from(variants);
-  }
+  const buildLookupVariants = self.ClaimAiUtils.buildLookupVariants;
 
   /**
     * Validates a list of extracted codes against the internal database.
@@ -282,6 +288,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     */
   async function validateCodesArray(codes, senderInfo = {}) {
     const results = [];
+    try {
+      await ensureDbInitializedAndSeeded();
+    } catch (e) {
+      console.error('ClaimAi: Failed to ensure DB was initialized/seeded before validation:', e);
+    }
     const dbInstance = db;
     const pmb = await ensurePmbMap();
 
@@ -350,6 +361,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     */
   async function queryIcd10Index(targetCode) {
     try {
+      try {
+        await ensureDbInitializedAndSeeded();
+      } catch (e) {
+        console.error('ClaimAi: Failed to ensure DB was initialized/seeded before query:', e);
+      }
       const variants = buildLookupVariants(targetCode);
       for (const variant of variants) {
         const rec = await db.getCode(variant);

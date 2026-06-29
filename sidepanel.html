@@ -1,308 +1,91 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ClaimAi</title>
-  <style>
-    body {
-      width: 320px;
-      max-width: 320px;
-      margin: 0;
-      padding: 12px;
-      background-color: #18181b;
-      color: #f4f4f5;
-      font-family: system-ui, -apple-system, sans-serif;
-      line-height: 1.45;
-      box-sizing: border-box;
-    }
-
-    .header {
-      font-size: 24px;
-      font-weight: bold;
-      color: #34d399;
-      margin-bottom: 16px;
-    }
-
-    .patient-context {
-      background: #27272a;
-      border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 16px;
-    }
-
-    .gender-btn {
-      padding: 8px 20px;
-      border-radius: 8px;
-      background: #3f3f46;
-      border: none;
-      color: white;
-      cursor: pointer;
-      font-weight: 500;
-      transition: background 0.15s, color 0.15s;
-    }
-
-    .gender-btn.active {
-      background: #34d399;
-      color: black;
-      font-weight: bold;
-    }
-
-    input[type="number"] {
-      background: #18181b;
-      border: 1px solid #3f3f46;
-      color: white;
-      padding: 10px;
-      border-radius: 8px;
-      font-size: 14px;
-    }
-
-    input[type="number"]:focus {
-      outline: none;
-      border-color: #34d399;
-    }
-
-    .card {
-      background-color: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 14px;
-      padding: 18px;
-      margin-bottom: 14px;
-    }
-
-    .code {
-      font-size: 28px;
-      font-weight: bold;
-      color: #34d399;
-      margin-bottom: 6px;
-      word-break: break-all;
-    }
-
-    p {
-      margin: 6px 0 10px 0;
-      word-break: break-word;
-      overflow-wrap: break-word;
-    }
-
-    .pmb-box {
-      background-color: #14532d;
-      border: 1px solid #34d399;
-      border-radius: 12px;
-      padding: 14px;
-      margin-top: 14px;
-    }
-
-    /* ── Utility classes used by sidepanel.js ── */
-    .mt-1 {
-      margin-top: 4px;
-    }
-
-    .mt-2 {
-      margin-top: 8px;
-    }
-
-    .mt-3 {
-      margin-top: 12px;
-    }
-
-    .mt-4 {
-      margin-top: 16px;
-    }
-
-    .mb-1 {
-      margin-bottom: 4px;
-    }
-
-    .mb-2 {
-      margin-bottom: 8px;
-    }
-
-    .mb-3 {
-      margin-bottom: 12px;
-    }
-
-    .p-3 {
-      padding: 12px;
-    }
-
-    .p-4 {
-      padding: 16px;
-    }
-
-    .my-2 {
-      margin-top: 8px;
-      margin-bottom: 8px;
-    }
-
-    .flex {
-      display: flex;
-    }
-
-    .items-center {
-      align-items: center;
-    }
-
-    .gap-2 {
-      gap: 8px;
-    }
-
-    .rounded-xl {
-      border-radius: 12px;
-    }
-
-    .rounded-2xl {
-      border-radius: 16px;
-    }
-
-    .text-xs {
-      font-size: 11px;
-    }
-
-    .text-sm {
-      font-size: 13px;
-    }
-
-    .text-lg {
-      font-size: 18px;
-    }
-
-    .font-medium {
-      font-weight: 500;
-    }
-
-    .font-semibold {
-      font-weight: 600;
-    }
-
-    .font-bold {
-      font-weight: 700;
-    }
-
-    .leading-relaxed {
-      line-height: 1.625;
-    }
-
-    .text-white {
-      color: #ffffff;
-    }
-
-    .text-zinc-200 {
-      color: #e4e4e7;
-    }
-
-    .text-zinc-400 {
-      color: #a1a1aa;
-    }
-
-    .text-emerald-400 {
-      color: #34d399;
-    }
-
-    .text-emerald-300 {
-      color: #6ee7b7;
-    }
-
-    .text-amber-300 {
-      color: #fcd34d;
-    }
-
-    .text-amber-400 {
-      color: #fbbf24;
-    }
-
-    .text-orange-100 {
-      color: #ffedd5;
-    }
-
-    .text-orange-400 {
-      color: #fb923c;
-    }
-
-    .text-red-100 {
-      color: #fee2e2;
-    }
-
-    .text-red-300 {
-      color: #fca5a5;
-    }
-
-    .text-red-400 {
-      color: #f87171;
-    }
-
-    .bg-zinc-900 {
-      background-color: #18181b;
-    }
-
-    .bg-orange-950 {
-      background-color: #431407;
-    }
-
-    .bg-red-950 {
-      background-color: #450a0a;
-    }
-
-    .border {
-      border-style: solid;
-      border-width: 1px;
-    }
-
-    .border-orange-500 {
-      border-color: #f97316;
-    }
-
-    .border-red-600 {
-      border-color: #dc2626;
-    }
-
-    .border-red-700 {
-      border-color: #b91c1c;
-    }
-
-    .border-red-800 {
-      border-color: #991b1b;
-    }
-
-    hr.border-red-800 {
-      border: none;
-      border-top: 1px solid #991b1b;
-      margin: 8px 0;
-    }
-  </style>
+  <link rel="stylesheet" href="sidepanel.css">
 </head>
-
 <body>
-  <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px;">
+  <!-- Header & Live Update Controls -->
+  <div class="panel-header-container">
     <div class="header">ClaimAi</div>
-    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
-      <label for="live-toggle" style="font-size:13px;color:#a1a1aa; white-space:nowrap;">Live</label>
+    <div class="live-toggle-container">
+      <label for="live-toggle" class="live-label">Live</label>
       <input type="checkbox" id="live-toggle" title="Toggle live updating from page input">
     </div>
   </div>
 
+  <!-- Dynamic Site Access Permission Banner -->
+  <div id="permission-banner" class="permission-banner" style="display: none;">
+    <div style="font-weight: 600; color: #fb923c; margin-bottom: 4px;">⚠️ Permission Required</div>
+    <div style="font-size: 11px; color: #e4e4e7; margin-bottom: 8px;">ClaimAi is disabled on this site to protect your privacy. Enable it to begin code scanning.</div>
+    <button id="grant-permission-btn" class="permission-btn">Enable ClaimAi</button>
+  </div>
+
+  <!-- Patient Context Filters -->
   <div class="patient-context">
-    <div style="margin-bottom: 8px; font-size: 13px; color: #a1a1aa;">PATIENT CONTEXT</div>
-
-    <div style="display: flex; gap: 8px; align-items: center;">
+    <div class="context-label">Patient Context</div>
+    <div class="context-controls">
       <input type="number" id="age" placeholder="Age (years)" min="0" max="120" step="1">
-
-      <div style="display: flex; gap: 6px;">
+      <div class="gender-group">
         <button class="gender-btn" id="male">M</button>
         <button class="gender-btn" id="female">F</button>
       </div>
     </div>
   </div>
 
+  <!-- Results Area (Populated dynamically) -->
   <div id="result">
-    <div class="card" id="code-card" style="display:none;">
+    <div class="card" id="code-card" style="display: none;">
       <div class="code" id="code-title">—</div>
-      <div id="code-description" class="text-zinc-200">Select or lookup a code to see details.</div>
-      <div id="pmb-status" class="mt-3 text-sm text-zinc-400">PMB status unknown</div>
+      <div id="code-description" class="description-text">Select or lookup a code to see details.</div>
+      <div id="pmb-status" class="status-badge unknown">PMB status unknown</div>
     </div>
   </div>
 
+  <!-- Usage & Privacy (POPIA-compliant Telemetry) -->
+  <div class="card privacy-card">
+    <div class="context-label">Usage & Privacy</div>
+    
+    <div class="telemetry-toggle-row">
+      <span class="telemetry-toggle-label">Share Anonymous Analytics</span>
+      <input type="checkbox" id="telemetry-toggle" title="Opt-in/out of anonymous telemetry">
+    </div>
+    
+    <div class="telemetry-info-text">
+      Help us improve ClaimAi by sharing anonymous usage stats. No patient PII/PHI or code details are ever tracked.
+    </div>
+
+    <div class="telemetry-dashboard" id="telemetry-dashboard" style="display: none;">
+      <hr class="telemetry-divider">
+      <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;">Local Activity Log</div>
+      <div class="telemetry-stats-grid">
+        <div class="telemetry-stat-item">
+          <div class="telemetry-stat-num" id="stats-validations">0</div>
+          <div class="telemetry-stat-lbl">Validations</div>
+        </div>
+        <div class="telemetry-stat-item">
+          <div class="telemetry-stat-num" id="stats-lookups">0</div>
+          <div class="telemetry-stat-lbl">Lookups</div>
+        </div>
+        <div class="telemetry-stat-item">
+          <div class="telemetry-stat-num" id="stats-time">0m</div>
+          <div class="telemetry-stat-lbl">Active Time</div>
+        </div>
+      </div>
+
+      <button id="view-payload-btn" class="permission-btn mt-3" style="background-color: var(--surface-border); border: 1px solid var(--surface-border); color: var(--text-primary); margin-top: 12px;">View Raw Payload</button>
+      
+      <div id="payload-display-container" style="display: none; margin-top: 12px; text-align: left;">
+        <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">ANONYMOUS REPORT SCHEMA:</div>
+        <pre id="telemetry-payload-pre" style="background: hsl(240, 6%, 6%); border: 1px solid var(--surface-border); padding: 8px; border-radius: 8px; font-family: monospace; font-size: 10px; color: var(--text-muted); overflow-x: auto; margin: 0;"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/utils.js"></script>
+  <script src="lib/telemetry.js"></script>
   <script src="sidepanel.js"></script>
 </body>
-
 </html>

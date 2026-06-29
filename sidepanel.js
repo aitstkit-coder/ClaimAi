@@ -51,24 +51,8 @@ async function loadData() {
   }
 }
 
-function normalizeCode(code) {
-  let clean = code.trim().toUpperCase().replace(/\s+/g, '');
-  if (clean.startsWith('0')) {
-    clean = 'O' + clean.slice(1);
-  }
-  return clean;
-}
-
-function getCodeVariants(code) {
-  const clean = normalizeCode(code);
-  const variants = new Set([clean]);
-  if (clean.includes('.')) {
-    variants.add(clean.replace(/\./g, ''));
-  } else if (clean.length > 3) {
-    variants.add(`${clean.slice(0, 3)}.${clean.slice(3)}`);
-  }
-  return Array.from(variants);
-}
+const normalizeCode = window.ClaimAiUtils.normalizeCode;
+const getCodeVariants = window.ClaimAiUtils.buildLookupVariants;
 
 function lookupIndex(index, code) {
   for (const variant of getCodeVariants(code)) {
@@ -162,87 +146,200 @@ function checkHighRisk(code, activeCodes) {
   });
 }
 
+function escapeHTML(str) {
+  if (!str) return '';
+  return String(str).replace(/[&<>'"]/g, 
+    tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag)
+  );
+}
+
+async function checkTabPermission() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url) return;
+
+    // Ignore internal pages
+    if (tab.url.startsWith('chrome:') || tab.url.startsWith('chrome-extension:') || tab.url.startsWith('about:')) {
+      const banner = document.getElementById('permission-banner');
+      if (banner) banner.style.display = 'none';
+      return;
+    }
+
+    const url = new URL(tab.url);
+    const origin = `${url.protocol}//${url.host}/*`;
+
+    chrome.permissions.contains({ origins: [origin] }, (hasPermission) => {
+      const banner = document.getElementById('permission-banner');
+      if (!banner) return;
+
+      if (hasPermission) {
+        banner.style.display = 'none';
+      } else {
+        banner.style.display = 'flex';
+        const grantBtn = document.getElementById('grant-permission-btn');
+        if (grantBtn) {
+          grantBtn.onclick = () => {
+            chrome.permissions.request({ origins: [origin] }, (granted) => {
+              if (granted) {
+                banner.style.display = 'none';
+                chrome.tabs.reload(tab.id);
+              }
+            });
+          };
+        }
+      }
+    });
+  } catch (e) {
+    console.warn('ClaimAi: Permission check failed:', e);
+  }
+}
+
+// Watch tab updates and activations
+chrome.tabs.onActivated.addListener(checkTabPermission);
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete') {
+    checkTabPermission();
+  }
+});
+
 async function showResult(code) {
   const resultDiv = document.getElementById('result');
-  let cleanCode = normalizeCode(code);
+  
+  // Track lookup feature usage
+  try {
+    window.ClaimAiTelemetry.trackFeatureUse('lookup');
+  } catch (e) {}
 
+  // Hide current result card if it's there
+  const codeCard = document.getElementById('code-card');
+  if (codeCard) codeCard.style.display = 'none';
+
+  // Show skeleton loader card
+  let skeleton = document.getElementById('skeleton-loader');
+  if (!skeleton) {
+    skeleton = document.createElement('div');
+    skeleton.id = 'skeleton-loader';
+    skeleton.className = 'skeleton-card';
+    skeleton.innerHTML = `
+      <div class="skeleton-title pulse"></div>
+      <div class="skeleton-line pulse" style="width: 90%;"></div>
+      <div class="skeleton-line pulse" style="width: 75%;"></div>
+      <div class="skeleton-line pulse" style="width: 50%;"></div>
+    `;
+    resultDiv.appendChild(skeleton);
+  }
+  skeleton.style.display = 'block';
+
+  // Wait 150ms to ensure the user gets a smooth loading pulse transitions
+  await new Promise(resolve => setTimeout(resolve, 150));
+
+  let cleanCode = normalizeCode(code);
   let icdData = null;
   let pmbData = null;
-  if (dbInstance) {
-    for (const variant of getCodeVariants(cleanCode)) {
-      if (!icdData) icdData = await dbInstance.getICD(variant);
-      if (!pmbData) pmbData = pmbIndex[variant] || await dbInstance.getPMB(variant);
-      if (icdData && pmbData) break;
+
+  try {
+    if (dbInstance) {
+      for (const variant of getCodeVariants(cleanCode)) {
+        if (!icdData) icdData = await dbInstance.getICD(variant);
+        if (!pmbData) pmbData = pmbIndex[variant] || await dbInstance.getPMB(variant);
+        if (icdData && pmbData) break;
+      }
+    } else {
+      icdData = lookupIndex(icd10Index, cleanCode);
+      pmbData = lookupIndex(pmbIndex, cleanCode);
     }
-  } else {
-    icdData = lookupIndex(icd10Index, cleanCode);
-    pmbData = lookupIndex(pmbIndex, cleanCode);
+  } catch (err) {
+    console.error('ClaimAi: Database query failed during showResult:', err);
+    try {
+      window.ClaimAiTelemetry.trackFeatureUse('error');
+    } catch (e) {}
   }
+
   const daData = lookupIndex(daggerAsteriskIndex, cleanCode + '*') || lookupIndex(daggerAsteriskIndex, cleanCode);
   const agCheck = checkAgeGender(cleanCode);
   const ecCheck = checkExternalCause(cleanCode);
   const hrCheck = checkHighRisk(cleanCode, currentLiveCodes);
 
+  // Hide skeleton loader once query completes
+  skeleton.style.display = 'none';
+
   let html = `<div class="card">`;
   const description = icdData?.d || pmbData?.pmbDescription || pmbData?.icdDescription || (ecCheck ? `Injury Category: ${ecCheck.category}` : 'No description available.');
 
   if (icdData || pmbData || daData) {
-    html += `<div class="code">${cleanCode}</div>`;
+    html += `<div class="code">${escapeHTML(cleanCode)}</div>`;
     if (!icdData && !pmbData && daData) {
-       html += `<p class="text-zinc-200">${daData.note || 'Dagger/Asterisk manifestation code.'}</p>`;
-       html += `<div class="mt-3 text-emerald-400 text-sm">✓ VALID DAGGER PAIR</div>`;
+       html += `<p class="description-text">${escapeHTML(daData.note || 'Dagger/Asterisk manifestation code.')}</p>`;
+       html += `<div class="mt-3 text-emerald-400 text-sm font-semibold">✓ VALID DAGGER PAIR</div>`;
     } else {
-       html += `<p class="text-zinc-200">${description}</p>`;
-       html += `<div class="mt-3 text-emerald-400 text-sm">✓ VALID ICD-10 Code${pmbData ? ' · PMB eligible' : ''}</div>`;
+       html += `<p class="description-text">${escapeHTML(description)}</p>`;
+       html += `<div class="mt-3 text-emerald-400 text-sm font-semibold">✓ VALID ICD-10 Code${pmbData ? ' · PMB eligible' : ''}</div>`;
     }
   } else if (ecCheck) {
-    html += `<div class="code text-blue-400">${cleanCode}</div>`;
-    html += `<p class="text-zinc-200">${description}</p>`;
-    html += `<div class="mt-3 text-blue-400 text-sm">ℹ️ Incomplete Code (Category)</div>`;
+    html += `<div class="code text-blue-400">${escapeHTML(cleanCode)}</div>`;
+    html += `<p class="description-text">${escapeHTML(description)}</p>`;
+    html += `<div class="mt-3 text-blue-400 text-sm font-semibold">ℹ️ Incomplete Code (Category)</div>`;
   } else {
-    html += `<div class="code text-amber-400">${cleanCode}</div><p class="text-amber-300">Code not found.</p>`;
+    try {
+      window.ClaimAiTelemetry.trackFeatureUse('error');
+    } catch (e) {}
+    html += `
+      <div class="error-title-container">
+        <span>⚠️ Code Not Found</span>
+      </div>
+      <div class="code text-amber-400">${escapeHTML(cleanCode)}</div>
+      <p class="error-desc">No matching South African ICD-10 clinical diagnostic code was found in the database. Please verify the characters and try again.</p>
+    `;
   }
 
   if (pmbData) {
     html += `
-      <div class="pmb-box mt-4">
-        <div class="flex items-center gap-2 text-emerald-400 mb-2 font-medium">🛡️ PMB-ELIGIBLE CONDITION</div>
-        <div class="text-sm">${pmbData.pmbDescription || pmbData.icdDescription}</div>
+      <div class="pmb-box">
+        <div class="pmb-title">🛡️ PMB-ELIGIBLE CONDITION</div>
+        <div class="text-sm">${escapeHTML(pmbData.pmbDescription || pmbData.icdDescription)}</div>
       </div>`;
   }
 
   if (agCheck) {
     html += `
-      <div class="mt-4 p-4 bg-red-950 border border-red-600 rounded-2xl">
-        <div class="flex items-center gap-2 text-red-400 mb-3 font-semibold">⚠️ DEMOGRAPHIC MISMATCH</div>
-        ${agCheck.warnings.map(w => `<p class="text-red-100">${w}</p>`).join('')}
+      <div class="alert-box danger">
+        <div class="alert-title">⚠️ DEMOGRAPHIC MISMATCH</div>
+        ${agCheck.warnings.map(w => `<div class="alert-content">${escapeHTML(w)}</div>`).join('')}
       </div>`;
   }
 
-    if (daData && daData.type === "asterisk") {
-      html += `
-        <div class="mt-4 p-4 bg-green-950 border border-green-500 rounded-2xl">
-          <div class="flex items-center gap-2 text-green-400 mb-3 font-semibold">✅ DAGGER CODE PAIR</div>
-          <p class="text-sm text-green-100">This manifestation code is paired with dagger code(s):</p>
+  if (daData && daData.type === "asterisk") {
+    html += `
+      <div class="alert-box info">
+        <div class="alert-title">✅ DAGGER CODE PAIR</div>
+        <div class="alert-content">
+          <p class="text-sm">This manifestation code is paired with dagger code(s):</p>
           <div class="mt-2 bg-zinc-900 p-3 rounded-xl">
             <div class="text-emerald-400 text-xs mb-1">SUGGESTED DAGGER CODE(S):</div>
-            <div class="text-lg font-bold text-white">${daData.pairedWith.join(" or ")}</div>
-            <div class="text-xs text-zinc-400 mt-1">${daData.note}</div>
+            <div class="text-lg font-bold text-white">${escapeHTML(daData.pairedWith.join(" or "))}</div>
+            <div class="text-xs text-zinc-400 mt-1">${escapeHTML(daData.note)}</div>
           </div>
-        </div>`;
-    }
+        </div>
+      </div>`;
+  }
 
   if (hrCheck && hrCheck.length > 0) {
-    html += `<div class="mt-4 p-4 bg-orange-950 border border-orange-500 rounded-2xl">`;
-    html += `<div class="flex items-center gap-2 text-orange-400 mb-3 font-semibold">⚠️ HIGH RISK BILLING PAIR</div>`;
+    html += `<div class="alert-box warning">`;
+    html += `<div class="alert-title">⚠️ HIGH RISK BILLING PAIR</div>`;
     
     hrCheck.forEach(item => {
       if (item.conflictPresent) {
-         html += `<p class="text-sm text-orange-100 mb-2">🔥 <b>CONFLICT DETECTED:</b> This code conflicts with active code <b>${item.conflictingActiveCode}</b>.</p>`;
-         html += `<p class="text-sm text-orange-200">Reason: ${item.rule.reason}</p>`;
+         html += `<div class="alert-content mb-2">🔥 <b>CONFLICT DETECTED:</b> This code conflicts with active code <b>${escapeHTML(item.conflictingActiveCode)}</b>.</div>`;
+         html += `<div class="alert-content">Reason: ${escapeHTML(item.rule.reason)}</div>`;
       } else {
-         html += `<p class="text-sm text-orange-100 mb-2">Avoid billing with: <b>${item.otherRuleCodes.join(', ')}</b></p>`;
-         html += `<p class="text-sm text-orange-200">Reason: ${item.rule.reason}</p>`;
+         html += `<div class="alert-content mb-2">Avoid billing with: <b>${escapeHTML(item.otherRuleCodes.join(', '))}</b></div>`;
+         html += `<div class="alert-content">Reason: ${escapeHTML(item.rule.reason)}</div>`;
       }
     });
     html += `</div>`;
@@ -252,7 +349,7 @@ async function showResult(code) {
   resultDiv.innerHTML = html;
 }
 
-// Patient Context
+// Patient Context & Telemetry Dashboard
 document.addEventListener('DOMContentLoaded', () => {
   const ageInput = document.getElementById('age');
   const maleBtn = document.getElementById('male');
@@ -292,6 +389,38 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.runtime.sendMessage({ action: 'SET_LIVE_MODE', enabled });
     });
   }
+
+  // Initialize POPIA-compliant Telemetry settings & UI listeners
+  try {
+    window.ClaimAiTelemetry.initializeTelemetry().then(() => {
+      updateTelemetryUI();
+
+      const telemetryToggle = document.getElementById('telemetry-toggle');
+      if (telemetryToggle) {
+        telemetryToggle.addEventListener('change', () => {
+          window.ClaimAiTelemetry.setConsent(telemetryToggle.checked).then(updateTelemetryUI);
+        });
+      }
+
+      const viewPayloadBtn = document.getElementById('view-payload-btn');
+      const payloadContainer = document.getElementById('payload-display-container');
+      if (viewPayloadBtn && payloadContainer) {
+        viewPayloadBtn.addEventListener('click', () => {
+          const isHidden = payloadContainer.style.display === 'none';
+          payloadContainer.style.display = isHidden ? 'block' : 'none';
+          viewPayloadBtn.textContent = isHidden ? 'Hide Raw Payload' : 'View Raw Payload';
+        });
+      }
+    });
+
+    // Record sidepanel load as an open event
+    window.ClaimAiTelemetry.trackFeatureUse('sidepanelOpen');
+  } catch (e) {
+    console.warn('ClaimAi Telemetry: Failed to bind UI listeners', e);
+  }
+
+  // Run initial tab permission check
+  checkTabPermission();
 });
 
 // Live updates
@@ -311,14 +440,12 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   }
 
   if (msg.action === 'LOAD_SELECTED_CODE' && msg.code) {
-    chrome.runtime.sendMessage({ action: 'QUERY_CODE', code: msg.code }, (response) => {
-      if (response && response.data) {
-        renderDetails(response.data);
-      } else {
-        renderUnknown(msg.code);
-      }
-    });
-    return true;
+    // Redirect selected code rendering to showResult to perform clinical audits
+    if (dataLoaded) {
+      showResult(msg.code);
+    } else {
+      pendingLookup = msg.code;
+    }
   }
 });
 
@@ -393,3 +520,48 @@ function renderSuggestions(suggestions, targetElementId) {
 
 // expose for other scripts if needed
 self.renderSuggestions = renderSuggestions;
+
+// Telemetry Dashboard Sync Functions
+function updateTelemetryUI() {
+  try {
+    window.ClaimAiTelemetry.getTelemetryPayload().then(data => {
+      if (!data) return;
+
+      const dashboard = document.getElementById('telemetry-dashboard');
+      if (dashboard) {
+        dashboard.style.display = data.consentGranted ? 'block' : 'none';
+      }
+
+      const toggle = document.getElementById('telemetry-toggle');
+      if (toggle) {
+        toggle.checked = data.consentGranted;
+      }
+
+      const validationsEl = document.getElementById('stats-validations');
+      const lookupsEl = document.getElementById('stats-lookups');
+      const timeEl = document.getElementById('stats-time');
+
+      if (validationsEl) validationsEl.textContent = data.validations || 0;
+      if (lookupsEl) lookupsEl.textContent = data.lookups || 0;
+      if (timeEl) {
+        const mins = Math.round((data.activeTimeMs || 0) / 60000);
+        timeEl.textContent = `${mins}m`;
+      }
+
+      const payloadPre = document.getElementById('telemetry-payload-pre');
+      if (payloadPre) {
+        payloadPre.textContent = JSON.stringify(data, null, 2);
+      }
+    });
+  } catch (e) {}
+}
+
+// Sync telemetry UI on storage updates (local aggregation changes)
+try {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes[window.ClaimAiTelemetry.TELEMETRY_KEY]) {
+      updateTelemetryUI();
+    }
+  });
+} catch (e) {}
+
